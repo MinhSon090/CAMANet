@@ -1,0 +1,1231 @@
+
+
+[2211.01412] CAMANet: Class Activation Map Guided Attention Network for Radiology Report Generation
+
+CAMANet: Class Activation Map Guided Attention Network for Radiology Report Generation
+
+Jun Wang
+
+  
+Abhir Bhalerao
+
+  
+Terry Yin
+
+  
+Simon See
+
+  
+
+  
+
+  
+Yulan He
+
+Thanks: Jun Wang’s PhD studentship is jointly funded by the University of Warwick and China Scholarship Council. We would like to thank the University of Warwick’s Scientific Computing Group for their support of this work and the UKRI/EPSRC HPC platform, Sulis and Avon. 
+
+Thanks: Jun Wang and Abhir Bhalerao are with the Department of Computer Science, University of Warwick, CV4 7AL Coventry, UK. (email: jun.wang.3@warwick.ac.uk, abhir.bhalerao@warwick.ac.uk)
+
+Thanks: Terry Yin and Simon See are with the NVIDIA AI Tech Center, Singapore.
+
+Thanks: Yulan He is with the Department of Informatics, King’s College London, WC2R 2LS, London, UK, the Department of Computer Science, University of Warwick, CV4 7AL Coventry, UK and the Alan Turing Institute, UK.
+
+Abstract
+    
+Radiology report generation (RRG) has gained increasing research attention because of its huge potential to mitigate medical resource shortages and aid the process of disease decision making by radiologists. Recent advancements in RRG are largely driven by improving a model’s capabilities in encoding single-modal feature representations, while few studies explicitly explore the cross-modal alignment between image regions and words. Radiologists typically focus first on abnormal image regions before composing the corresponding text descriptions, thus cross-modal alignment is of great importance to learn a RRG model which is aware of abnormalities in the image. Motivated by this, we propose a Class Activation Map guided Attention Network (CAMANet) which explicitly promotes cross-modal alignment by employing aggregated class activation maps to supervise cross-modal attention learning, and simultaneously enrich the discriminative information.
+CAMANet contains three complementary modules: a Visual Discriminative Map Generation module to generate the importance/contribution of each visual token; Visual Discriminative Map Assisted Encoder to learn the discriminative representation and enrich the discriminative information; and a Visual Textual Attention Consistency module to ensure the attention consistency between the visual and textual tokens, to achieve the cross-modal alignment. Experimental results demonstrate that CAMANet outperforms previous SOTA methods on two commonly used RRG benchmarks. 11
+          1
+          
+          
+          
+        The code is available at https://github.com/Markin-Wang/CAMANet
+
+  
+
+Index Terms: Radiology report generation, Cross-modal alignment, Class activation map
+
+I Introduction
+
+Radiology report generation (RRG) aims to automatically describes radiology images, e.g., X-Ray and MRI, by human-like language. Generating a coherent report requires expertise from radiologists, who are however among the most in-demand medical specialists in most countries. Moreover, it can take at least 5 minutes to describe a radiology image even for a professional radiologist . Consequently, there had been growing interest in automating RRG because of its huge potential to efficiently and effectively assist the diagnosis process.
+
+RRG is a challenging task
+but with the availability of large-scale datasets and newly developed high-performance computer vision and language models, some valuable insights and improvements have been recently reported [1, 2, 3, 4]. The performance however is still far from satisfactory for methods to be deployed in clinical practice. This is because, different from the traditional image captioning task which mostly requires generating one or two sentences, RRG demands 22-44 times more text to adequately describe the findings in an image. Also, radiology reports tend to contain sentences with more sophisticated semantic relationships with their corresponding image regions, calling for a need for more precise cross-modal alignment, i.e., alignment between words and image regions. An example is shown in Figure 1 where the cross-modal alignments are marked in the same color. The problem is exacerbated as there exist data biases in commonly used datasets with significantly fewer radiology reports from X-ray images containing abnormal regions, making it hard for the RRG models to efficiently capture abnormal features. Also, such abnormal regions often make up only a small proportion of pathological images. Furthermore, even in pathological cases, most report sentences may be associated with a description of normal findings, as shown in Figure 1.
+
+Fig. 1: A Chest XRay image with its report findings. By way of example, manually aligned visual-textual features are marked in the same color
+
+.
+
+Previous approaches [5, 1, 2] often focus on improving the visual representation capability or better learning the semantic patterns by utilizing a learnable memory. Few studies explicitly explore representation learning with information about image abnormality detection and cross-modal alignment. To bridge this gap, we propose a Class Activation Map guided Attention Network (CAMANet) which distills the discriminative information into the encoder and explicitly improves cross-modal alignment by leveraging class activation maps [6]. This work makes four principal contributions:
+
+1. 
+
+We propose a novel end-to-end class activation map guided attention model where the class-activation map (CAM) is utilized to explicitly promote cross-modal alignment and discriminative representation learning. To the best of our knowledge, CAMANet is the first work to leverage CAMs in this way.
+
+2. 
+
+A Visual Discriminative Map (VDM) Generation module to derive the visual discriminative map from the CAMs based on the pseudo labels from an automatic labeler.
+
+3. 
+
+We present a VDM Assisted Encoder which enriches the discriminative information by utilizing a self-attention mechanism and the VDM.
+
+4. 
+
+We design a visual-textual attention consistency module which considers the VDM as the ground truth to supervise the cross-modal attention learning in the decoder, promoting cross-modal alignment.
+
+Experimental results demonstrate that CAMANet outperforms the previous state-of-the-art (SOTA) methods on two widely-used benchmarks. Discussion and proposals are given to inspire future work.
+
+Fig. 2: The architecture of CAMANet: An image is fed into the Visual Extractor to obtain patch features which are then utilized to generate the VDM via the VDM Generation module. The proposed VDMAE leverages the VDM to derive a discriminative representation and enrich the discriminative information. Combined with word embedding, visual tokens are sent to the transformer to produce the report. After that, the VTAC module generates a TDM from the cross-modal attention scores and considers the VDM as the ground truth to supervise the cross-modal alignment learning. 
+
+II Related Work
+
+II-A Image Captioning
+
+Image captioning, aiming to describe an image with human-like sentences, is considered as a high-level visual understanding problem taking advantage of both the techniques of computer vision and natural language processing. Because of the great success in machine translation and language generation, recent SOTA approaches [7, 8, 9, 10, 11] also follow an encoder-decoder architecture and have demonstrated a great improvement in some traditional image captioning benchmarks. In particular, the most successful models [12, 8, 9, 13] usually adopt the Transformer [14] as their backbone due to its self-attention mechanism and impressive capability of modelling long-range dependency. However, these methods are tailored for traditional scene images and not suitable for the radiology images with long sentence report and fine-grained, abnormal regions. Although several works [15, 16] have been developed to tackle long text generation, they often fail to capture specific medical observations and tend to generate normal descriptions, resulting in unsatisfactory performance.
+
+II-B Radiology Report Generation
+
+Following on from the success in image captioning, recent SOTA RRG studies all adopt similar architectures: an encoder-decoder to generate the report combined with a visual feature extractor. For example, Jing et al.[17] proposed a hierarchical LSTM model to mitigate the long sentence generation problem and developed a co-attention mechanism to localize abnormal regions. Other works have utilized disease topic information [4, 5] and obtain better results. Liu et al. [18] extended these works by taking advantage of both the prior and posterior knowledge, i.e., knowledge from the similar images and a predefined topic bag. Chen et al. [1] designed a relational memory and a memory-driven conditional layer normalization to better learn the report patterns.
+
+The aforementioned studies often neglect the importance of cross-modal alignment and discriminative (disease-related) representation learning. As the only work we know exploring the cross-modal alignment in RRG, R2GenCMN [2], designed a shared memory matrix, expected to be able to implicitly learn the cross-modal alignment. However, learning the cross-modal alignment in this way proves difficult since the model is only trained under a cross entropy loss for report generation without any other forms of supervision/guidance for the cross-modal alignment learning. To address these problems, we propose a visual-textual attention consistency module to explicitly force the visual and textual modalities to focus on the same image regions. In addition, we develop a VDM-assisted encoder to enrich the discriminative information.
+
+There are a few works [19, 20] exploring the image-word matching in scene images, which are similar to the cross modal alignment. However, these methods normally require a well pre-trained fully-supervised detector, e.g Faster RCNN [21] trained on ground truth labels to detect the object proposals offline. In addition, they exploit bounding-box annotations and utilize them to form the mapping during supervision. Unfortunately, because they are time-consuming and costly to obtain, there is no large dataset for the RRG with such valuable ground truth labels to train an accurate detector and form the extra supervision. As a result, object detection methods become unsuitable for RRG, and instead we seek to integrate and train the visual extractor in the entire architecture. Another significant difference between our work and [19] is that the supervision of [19] is applied on each word-region pair thus making it difficult to learn, while our method improves the cross-modal alignment by ensuring the consistency between the block-level, derived visual and textual discriminative maps.
+
+II-C Class Activation Maps
+
+First proposed by Zhou et al. [6], a class activation map (CAM) was widely used for weakly supervised object detection (WSOD) aiming to localize objects with only image-level annotations. Bae et al. [22] improved the vanilla CAM method in WSOD by dealing with negatively weighted actions and instability in the thresholding process. Jiang et al. [23] observed that previous CAM methods were inclined to locate coarse-grained objects due to the low spatial resolution in the final convolution layer and proposed a LayerCAM to collect object information from coarse to fine levels. Xie et al. [24] argued that previous works in WSOD generated a CAM based on high-level features but a CAM from low-level features was important also to include richer contextual object information. Generally, the CAM technique is used mainly to localize the class-specific image regions which are then utilized to obtain the bounding boxes in WSOD .
+
+CAMs can identify the discriminative regions in an image by employing a global average pooling layer (GAP). Consequently, this technique is widely adopted in some weakly supervised semantic segmentation (WSSS) methods to generate pseudo-labels and provides performance gains. For instance, Sun et al [25] proposed a ECS-Net which regards the derived CAM as the segmentation supervision to drive the model to learn a robust representation. Chen et al. [26] pointed out the inconsistency between the pseudo masks generated by the CAM and the binary-cross-entropy loss in WSSS and designed the ReCAM module to cope with this problem. Ru et al. [27] combined the studies of CAMs and Transformers to refine the initial pseudo-labels generated by a CAM via an affinity from an attention module, showing promising results in WSSS.
+
+Different from these works, here we use a CAM to enhance the discriminative representation capability and the cross-modal alignment. Specifically, we utilize the CAM technique to derive a visual discriminative map focusing on the discriminative (important or abnormal) regions which is then used to enrich the discriminative information in the encoder. This acts as the ground truth to supervise the cross-modal attention learning. To the best of our knowledge, we have not seen CAMs being leveraged in this way for the RRG task.
+
+II-D Pretrained Language and Vision-Language Models in RRG 
+
+Recently, several large language models (LLMs) [28, 29, 30] have been proposed for the radiology domain. However, they are single-modal (language) models, e.g., Radiology-GPT [28], focusing on text-to-text or text-to-choice tasks, e.g, from radiology findings to radiology impressions and do not support images as input, while RRG aims to generate the findings from an image and is a cross-modal task, with no text available during the inference. Therefore, these LLMs cannot normally be applied directly to RRG.
+
+Although not directly applicable, to still take advantage of the power of pre-trained language models (PLMs), the recent work PromptRRG [31] leverages PLMs as a separate text encoder with prompt learning to distill prior knowledge into the model for RRG. Pre-trained vision-language models (PVLMs) demonstrate improved performance when applied to the downstream tasks, e.g., image classification and visual-question answering, in the natural scene domain. There are several attempts [32, 33] exploring the performance of PVLMs in RRG. However, although they leverage extra datasets and utilize both the findings and impressions sections of reports, these methods have shown unpromising results in RRG possibly since the simple pre-training scheme cannot cope with the intrinsic problems in RRG, aforementioned, and inadequate pretraining on paired medical data for a cross-modal task such as RRG.
+
+III Method
+
+Before detailing our method, in Section III-A we provide some background of RRG including problem formulation and general architecture. In Section III-B, we elaborate each proposed component of CAMANet. The final objective function is described in Section III-C. An overview of the CAMANet architecture is illustrated in Figure 2. Generally, an image is first fed into the visual feature extractor to obtain a sequence of visual tokens. Then, the proposed visual discriminative map (VDM) generation module takes these visual tokens as input to derive the visual discriminative map focusing on possible abnormal regions. This VDM, combined with the visual tokens, are then sent to the VDM assisted encoder module to enrich the abnormal information and then generate the report in the decoder. The VTAC module generates a textual discriminative map (TDM) from the cross-modal attention scores and considers the VDM as the ground truth to supervise cross-modal alignment learning.
+
+III-A Background
+
+Given a radiology image 𝑰\bm{I}, the purpose of RRG is to generate coherent findings (report) 𝑹\bm{R} from 𝑰\bm{I}. Recent SOTA methods often adopt an encoder-decoder framework to generate the report. In particular, a visual extractor, e.g. DenseNet121 [34], is first employed to extract visual features 𝑽i∈ℝH×W×C\bm{V}^{i}\in\mathbb{R}^{H\times W\times C} that are then flattened to a sequence of visual tokens 𝑽s∈ℝH​W×C\bm{V}^{s}\in\mathbb{R}^{HW\times C}. HH, WW, CC are the height, width and the number of channels respectively. This process is formulated as:
+
+{v1s,v2s,…,vks,…,vNs−1s,vNss}=fv​f​e​(𝑰),\{v^{s}_{1},v^{s}_{2},...,v^{s}_{k},...,v^{s}_{N^{s}-1},v^{s}_{N^{s}}\}=f_{vfe}(\bm{I}),
+
+(1)
+
+where vksv^{s}_{k} denotes the patch feature in the kt​hk^{th} position in 𝑽s\bm{V}^{s}, and Ns=H×WN^{s}=H\times W. fv​f​ef_{vfe} is the visual feature extractor.
+
+These visual tokens are then fed into the transformer based encoder-decoder to generate a report 𝑹\bm{R}. Specifically, at time step TT, the encoder maps the visual tokens into an intermediate representations 𝒍i∈ℝ1×D\bm{l}^{i}\in\mathbb{R}^{1\times D}. An embedding layer is applied to obtain the word embedding 𝒍r∈ℝ1×D\bm{l}^{r}\in\mathbb{R}^{1\times D} of each word ww in the report 𝑹\bm{R}. DD is the number of dimensions of hidden states. After this, the decoder takes these two sequence features as source inputs and predicts the current output (word). In general, we express the encoding and decoding processes as:
+
+{l1i,l2i,…,lNsi}=fe​n​(v1s,v2s,…,vNss),\displaystyle\{l^{i}_{1},l^{i}_{2},...,l^{i}_{N^{s}}\}=f_{en}(v^{s}_{1},v^{s}_{2},...,v^{s}_{N^{s}}),
+
+(2)
+
+{l1r,l2r,…,lT−1r}=fe​m​(w1,w2,…,wT−1),\displaystyle\{l^{r}_{1},l^{r}_{2},...,l^{r}_{T-1}\}=f_{em}(w_{1},w_{2},...,w_{T-1}),
+
+(3)
+
+pT=fd​e​(l1i,l2i,…,lNsi,l1r,l2r,…,lT−1r),\displaystyle p_{T}=f_{de}(l^{i}_{1},l^{i}_{2},...,l^{i}_{N^{s}};l^{r}_{1},l^{r}_{2},...,l^{r}_{T-1}),
+
+(4)
+
+Where the fe​n,fe​mf_{en},f_{em} and fd​ef_{de} denotes the encoder, embedding layer and the decoder respectively. wiw_{i} and pTp_{T} are the it​hi^{th} word in the report and the word prediction at time step TT.
+
+The encoder and decoder both consist of several transformer layers where a cross-attention is further added after the self-attention in each decoder layer to enable cross-modal fusion.
+
+III-B CAMANet
+
+Learning the cross-modal alignment and discriminative representation is challenging but essential for RRG. To achieve this, CAMANet uses a Visual Discriminative Map Assisted Encoder and a Visual-Textual Attention Consistency module which take advantage of the CAM technique.
+
+III-B1 Visual Discriminative Map Generation
+
+The first step is to generate a visual discriminative map indicating the discriminative regions in an image. This map is then used in the VDM Assisted Encoder (VDMAE) and the Visual-Textual Attention Consistency (VTAC) modules to enable the discriminative representation learning and cross-modal alignment.
+
+We propose a way to leverage the class activation map (CAM) technique to localize discriminative regions. CAM requires the image category labels to form a classification task, so as to obtain the patch contributions (importance) to each category. The category labels are often unavailable for RRG datasets because of the time and expense required to create them. To overcome this problem in CAMANet, we utilize CheXpert [35], an automatic labeller, to generate a pseudo label 𝒚\bm{y} for each image. We can form a multi-label classification task given that 𝒚\bm{y} is a multi-hot vector encoding the presence of 14 common observations in Chest X-ray images from the automatic labeller.
+As shown in the upper lef red box in  Figure 2, a classification head is added, taking the extracted visual tokens from the visual extractor as input, to predict the presence y~i∈0,1\widetilde{y}_{i}\in{0,1} for it​hi^{th} disease formulated as:
+
+𝒗g=\displaystyle\bm{v}_{g}=
+1Ns​∑j=1Nsvjs,\displaystyle\frac{1}{N^{s}}\sum_{j=1}^{N^{s}}v^{s}_{j},
+
+(5)
+
+{y~1,y~2,…,y~Nc}=\displaystyle\{\widetilde{y}_{1},\widetilde{y}_{2},...,\widetilde{y}_{N^{c}}\}=
+Φ⁡(Softmax​(𝑾c⋅𝒗g)),\displaystyle\ \Phi(\text{Softmax}(\bm{W}_{c}\cdot\bm{v}_{g})),
+
+(6)
+
+Φ⁡(o)=\displaystyle\Phi(o)=
+{0i​f​o≤0.5,1i​f​o>0.5,\displaystyle\left\{\begin{aligned} 0\quad if\ o\leq 0.5,\\
+1\quad if\ o>0.5,\\
+\end{aligned}\right.
+
+(7)
+
+where 𝒗g\bm{v}_{g} and 𝑾c\bm{W}_{c} are the global visual feature and weights of the classification head. NcN^{c} is the number of disease categories.
+
+After the forward process of the visual extractor, we can obtain the class activation map 𝒎i={m1i,m2i,…,mNsi}\bm{m}^{i}=\{m^{i}_{1},m^{i}_{2},...,m^{i}_{N^{s}}\} for it​hi^{th} category with y~i=1\widetilde{y}_{i}=1. Remember that the classification is for the multi-label scenario, hence each sample may show the presence of multiple observations. To this end, we aggregate the class activation maps for all the categories present and generate a visual discriminative map 𝒅v\bm{d}^{v} to target important regions. In particular, we first use the ReLU activation function to zero out negative contributions. Min-max normalization is then applied to each class activation map. Equation 8 formulates this process on the class activation map of it​hi^{th} category 𝒎i\bm{m}^{i}:
+
+m~ji=σ⁡(mji)−min⁡(σ⁡(𝒎i))σ⁡(max⁡(𝒎i))−σ⁡(min⁡(𝒎i)),\widetilde{m}^{i}_{j}=\frac{\sigma(m^{i}_{j})-\min(\sigma(\bm{m}^{i}))}{\sigma(\max(\bm{m}^{i}))-\sigma(\min(\bm{m}^{i}))},
+
+(8)
+
+where m~ji\widetilde{m}^{i}_{j} is the normalized contribution of jt​hj^{th} patch for it​hi^{th} category and σ\sigma denotes the ReLu activation function. Then, the final visual discriminative map 𝒅v∈ℝ1×Ns\bm{d}^{v}\in\mathbb{R}^{1\times N^{s}} is obtained via maximum pooling over all the class activation maps:
+
+𝒅v=MaxPool​({𝒎𝒌|y~k=1}).\bm{d}^{v}=\text{MaxPool}(\{\bm{m^{k}}|\,\widetilde{y}_{k}=1\}).
+
+(9)
+
+Note that we chose the class activation map techniques to generate the visual discriminative map due to their high efficiency, and any weakly supervised techniques producing patch-level scores could be applied here.
+
+III-B2 VDM Assisted Encoder
+
+Since the dataset is dominated by normal samples, e.g., normal images and descriptions, the RRG model struggles to capture abnormal information and describe abnormal regions. To mitigate this problem, we propose a visual discriminative map (VDM) assisted encoder, the VDMAE, to enrich the discriminative information. This is achieved by learning a discriminative representation in terms of the VDM 𝒅v\bm{d}^{v}, which is distilled into the encoder. We show this procedure by the green rectangle in Figure 2. Specifically, the discriminative representation 𝒓′∈ℝ1×C\bm{r}^{{}^{\prime}}\in\mathbb{R}^{1\times C} is obtained by matrix multiplication between the visual discriminative map 𝒅v∈ℝ1×Ns\bm{d}^{v}\in\mathbb{R}^{1\times N^{s}} and the image patch features followed by a normalization layer to stabilize the distribution,
+
+𝒓\displaystyle\bm{r}
+=𝒅v​𝑽s,\displaystyle=\bm{d}^{v}\bm{V}^{s},
+
+(10)
+
+𝒓′\displaystyle\bm{r}^{{}^{\prime}}
+=LayerNorm​(𝒓).\displaystyle=\text{LayerNorm}(\bm{r}).
+
+(11)
+
+where 𝑽s∈ℝNs×C\bm{V}^{s}\in\mathbb{R}^{N^{s}\times C} is the extracted visual token sequence obtained by Equation 1.
+
+After obtaining the discriminative representation, we add it as an extra input token to the encoder and leverage the power of an attention mechanism to gradually incorporate the VDM features for representation learning. Then Equation 2 becomes:
+
+{𝒓⋆,l1i,…,lNsi}=fe​n(𝒓′,v1s,…,vNss),\{\bm{r}^{\star},l^{i}_{1},...,l^{i}_{N^{s}}\}=f_{en}(\bm{r}^{{}^{\prime}},v^{s}_{1},...,v^{s}_{N^{s}}),
+
+(12)
+
+where 𝒓⋆\bm{r}^{\star} denotes the encoded discriminative representation. Through the self-attention mechanism in the encoder, other visual tokens can fully interact with this to learn the useful discriminative information.
+
+Fig. 3: An illustration of the visual-textual attention consistency. The decoder model is expected to pay attention to the same regions as the vision model to achieve consistency.
+
+III-B3 Visual-Textual Attention Consistency
+
+Human experts demonstrate excellent consistency when generating the report, i.e., they pay attention to important regions first and are able to accurately describe what they see. To exploit such characteristics, we design a Visual-Textual Attention Consistency (VTAC) module to explicitly learn the cross-modal alignment using the visual discriminative map 𝒅v\bm{d}^{v} as the ground truth to supervise the cross-modal attention learning in the decoder, as demonstrated in the upper right blue rectangular in Figure 2. When generating a finding, like human behaviour, we expect that the decoder model should attend to the same regions as the visual classifier which is trained to focus on the important regions described in the previous sections. Figure 3 shows an illustration of this visual-textual attention consistency. In this example, the VDMAE module will produce an attention map focusing on the relevant regions for a sample presenting “Consolidation”, and the decoder model is expected to pay attention to the same regions as the vision side in the cross-modal attention when generating the next word “consolidation” given the previous words and visual tokens.
+
+Nonetheless, each word in the report has its own attention to the image in the cross-modal attention. This raises a question of how to utilize a single visual discriminative map to supervise multiple attentions from different words. To deal with this problem, we also form a textual discriminative map 𝒅t\bm{d}^{t} by aggregating the attentions from important words. These important words are selected based on the similarities between their word embeddings and encoded visual discriminative representation 𝒓⋆\bm{r}^{\star} which contains rich visual discriminative information. In detail, we first compute the cosine similarities between the embedding of each word and the visual discriminative representation via:
+
+sj=ljr⋅𝒓⋆|ljr|​|𝒓⋆|,s_{j}=\frac{l^{r}_{j}\cdot\bm{r}^{\star}}{|l^{r}_{j}||\bm{r}^{\star}|},
+
+(13)
+
+where sjs_{j} denotes the similarity between jt​hj^{th} word and the discriminative representative and ⋅\cdot is the dot product operation.
+
+We expect the embeddings of important words to have higher similarity to the visual discriminative representation in the latent space. Therefore, the top k%k\% words with the higher similarities are selected to generate a textual discriminative map. Specifically, taking the visual tokens and textual tokens representations from the last layer, the cross-modal attention layer in the last decoder outputs the attention scores A⋆∈ℝNr×NsA^{\star}\in\mathbb{R}^{N^{r}\times N^{s}} between each visual-textual-token pairs. NrN^{r} denotes the number of words in the report. After selecting top kk% important words through
+Equation 13, we can now form the cross-modal attention score matrix of the important words 𝑨={𝒂1,𝒂2,…,𝒂γ}\bm{A}=\{\bm{a}^{1},\bm{a}^{2},...,\bm{a}^{\gamma}\} from the whole cross-modal attention scores 𝑨⋆\bm{A}^{\star}, where 𝒂i∈ℝ1×Ns\bm{a}^{i}\in\mathbb{R}^{1\times N^{s}} denotes the attention scores (similarities) between it​hi^{th} selected important word and each visual tokens (image regions).
+Then, the generation of the textual discriminative map 𝒅t∈ℝ1×Ns\bm{d}^{t}\in\mathbb{R}^{1\times N^{s}} is derived via  Equation 14 and  Equation 15, which is similar to the generation of the visual discriminative map,
+
+a~ji=\displaystyle\widetilde{a}^{i}_{j}=
+σ⁡(aji)−min⁡(σ⁡(𝒂i))σ⁡(max⁡(𝒂i))−σ⁡(min⁡(𝒂i))\displaystyle\frac{\sigma(a^{i}_{j})-\min(\sigma(\bm{a}^{i}))}{\sigma(\max(\bm{a}^{i}))-\sigma(\min(\bm{a}^{i}))}
+
+(14)
+
+𝒅t=\displaystyle\bm{d}^{t}=
+MaxPool​([𝒂~1,𝒂~2,…,𝒂~γ]),\displaystyle\text{MaxPool}([\widetilde{\bm{a}}^{1},\widetilde{\bm{a}}^{2},...,\widetilde{\bm{a}}^{\gamma}]),
+
+(15)
+
+where a~ji\widetilde{a}^{i}_{j} is the normalized attention score of it​hi^{th} word for jt​hj^{th} image region. γ=⌈k%×Nr⌉\gamma=\lceil k\%\times N^{r}\rceil is the number of selected words to generate the textual discriminative map.
+
+However, since Equation 15 ignores the relative importance of the selected words, we use the calculated similarity to generate the weights of each word via wj=σ⁡(sj)w_{j}=\sigma(s_{j}). By considering the relative importance, Equation 15 then becomes:
+
+𝒅t=MaxPool​([w1​𝒂1~,w2​𝒂2~,…,wγ​𝒂γ~]).\bm{d}^{t}=\text{MaxPool}([w_{1}\widetilde{\bm{a}^{1}},w_{2}\widetilde{\bm{a}^{2}},...,w_{\gamma}\widetilde{\bm{a}^{\gamma}}]).
+
+(16)
+
+After obtaining the textual discriminative map, 𝒅t∈ℝ1×Ns\bm{d}^{t}\in\mathbb{R}^{1\times N^{s}}, the visual-textual attention consistency is achieved by making 𝒅t\bm{d}^{t} to be close to the visual discriminative map 𝒅v\bm{d}^{v} through a Mean Squared Error (MSE) loss:
+
+ℒm​s​e=1Ns​∑j=1Ns‖𝒅jt−𝒅jv‖,\mathcal{L}_{mse}=\frac{1}{N^{s}}\sum_{j=1}^{N^{s}}||\bm{d}^{t}_{j}-\bm{d}^{v}_{j}||,
+
+(17)
+
+Note that we detach the encoded visual discriminative representation 𝒓⋆\bm{r}^{\star} in the decoder. The reason is that adding it as an extra visual token into the decoder will result in a size difference between the visual discriminative map and textual discriminative map (NsN^{s} vs Ns+1N^{s}+1), since there are no discriminative tokens available before generating the VDM. As mentioned in the Introduction, commonly used datasets suffer from severe data biases. The VTAC module therefore aims to explicitly promote the cross-modal alignments by ensuring the language model focusing on the same discriminative visual regions as the vision backbone. The vision and language backbone are complementary eventually achieving consistency to pay greater attention to the same discriminative regions, instead of only relying on cross-modal attention in the decoder in the base model which exhibit almost no cross-modal alignment (we show this in the next section). By enforcing the model to focus more on the discriminative regions, the model can better capture the abnormal features and descriptions, so as to alleviate the data bias. Additionally,
+to explicitly improve the cross-modal alignment in the VTAC module, the model is required to learn how to select the important words whose cross-modal attention scores will be aggregated to generate the textual discriminative map. This encourages the model gain a better understanding of the global context, e.g., sentence discourse relations, of a report.
+
+III-C Objective Function
+
+Given the entire predicted word token sequence {pi}\{p_{i}\} as the generated report and the associated ground truth report {wi}\{w_{i}\}, CAMANet is jointly optimized with the cross-entropy loss ℒc​e\mathcal{L}_{ce}, the binary cross entropy loss ℒb​c​e\mathcal{L}_{bce} for the multi-label classification in visual discriminative map generation and the mean square error loss ℒm​s​e\mathcal{L}_{mse} in the VTAC module:
+
+ℒc​e\displaystyle\mathcal{L}_{ce}
+=−1Nr∑i=1Nrwi⋅log(pi),\displaystyle=-\frac{1}{N^{r}}\sum_{i=1}^{N^{r}}w_{i}\cdot log(p_{i}),
+
+(18)
+
+ℒ\displaystyle\mathcal{L}
+=ℒc​e+λ​ℒb​c​e+δ​ℒm​s​e.\displaystyle=\mathcal{L}_{ce}+\lambda\mathcal{L}_{bce}+\delta\mathcal{L}_{mse}.
+
+(19)
+
+Here λ\lambda an δ\delta are two hyper-parameters which balance the loss contributions.
+
+IV Experiments
+
+IV-A Datasets
+
+We validate the effectiveness of CAMANet on two commonly used RRG datasets, i.e., IU-Xray and MIMIC-CXR. IU-Xraycontains 7,470 X-ray images and 3,955 corresponding reports. The majority of patients provided both the frontal and lateral radiology images. MIMIC-CXR
+is a large chest X-ray dataset with 473,057 X-ray images and 206,563 reports
+Both of these two datasets are publicly available. We follow the same data splits as [1, 2], to divide the IU-Xray dataset into train (70%), validation (10%) and test (20%) sets and remove samples without both view of images. The official data split is adopted for the MIMIC-CXR dataset.
+
+IV-B Evaluation Metrics
+
+Four widely used text generation evaluation metrics: BLEU{1-4} [36], Rouge-L [37], METEOR [38] and CIDEr [39] are employed to gauge the model performance. BLEU score is assessed based on n-gram precision. It calculates the overlap of n-grams between the generated and reference texts with a brevity penalty to prevent very short generated sentences. Rouge-L uses the longest common subsequence (LCS) between the generated and reference texts to calculate a score. METEOR takes the synonyms and stemming into the consideration when calculating the score and combines precision and recall into a single metric, giving more weight to recall. CIDEr is a consensus-based scorer. It calculates the term frequency-inverse document frequency (TF-IDF) for n-grams in the generated and ground truth captions to capture the consensus and penalizes common n-grams that are not informative. To measure the model capability of capturing the abnormalities, we follow previous works to report the clinical efficacy metric where CheXbert [40] (a recent SOTA automatic labeler supporting the GPU acceleration) is applied to labeling the generated reports and the results are compared with ground truths in 14 different categories related to thoracic diseases and support devices. We use the micro-average precision, recall and F1 score to model the model performance for the clinical efficacy.
+
+TABLE I: Comparative results of CAMANet with previous studies. The best values are highlighted in bold and the second best are underlined. BL and RG, MTOR and CIDR are the abbreviations of BLEU, ROUGE, METEOR and CIDEr respectively.
+
+Dataset
+Method
+BL-1
+BL-2
+BL-3
+BL-4
+RG-L
+MTOR
+CIDR
+
+IU-Xray
+A​D​A​A​T​TADAATT [11]
+0.220
+0.127
+0.089
+0.068
+0.308
+-
+0.295
+
+A​T​T​2​I​NATT2IN [10]
+0.224
+0.129
+0.089
+0.068
+0.308
+-
+0.220
+
+S​e​n​t​S​A​T+K​GSentSAT+KG [5]
+0.441
+0.291
+0.203
+0.147
+0.304
+-
+0.304
+
+H​R​G​RHRGR [41]
+0.438
+0.298
+0.208
+0.151
+0.322
+-
+0.343
+
+C​o​A​TCoAT [17]
+0.455
+0.288
+0.205
+0.154
+0.369
+-
+0.277
+
+C​M​A​S−R​LCMAS-RL [42]
+0.464
+0.301
+0.210
+0.154
+0.362
+-
+0.275
+
+R​2​G​e​nR2Gen [1]
+0.470
+0.304
+0.219
+0.165
+0.371
+0.187
+-
+
+K​E​R​PKERP [43]
+0.482
+0.325
+0.226
+0.162
+0.339
+-
+0.280
+
+C​M​C​LCMCL [44]
+0.473
+0.305
+0.217
+0.162
+0.378
+0.186
+-
+
+R​2​G​e​n​C​M​N∗R2GenCMN^{*} [2]
+0.475
+0.309
+0.222
+0.170
+0.375
+0.191
+-
+
+X​P​R​O​N​e​tXPRONet [3]
+0.525
+0.357
+0.262
+0.199
+0.411
+0.220
+0.359
+
+𝑪​𝑨​𝑴​𝑨​𝑵​𝒆​𝒕​(O​u​r​s)\bm{CAMANet}(Ours)
+0.504
+0.363
+0.279
+0.218
+0.404
+0.203
+0.418
+
+MIMIC
+R​A​T​C​H​E​TRATCHET [45]
+0.232
+-
+-
+-
+0.240
+0.101
+-
+
+-CXR
+S​TST [14]
+0.299
+0.184
+0.121
+0.084
+0.263
+0.124
+-
+
+A​D​A​A​T​TADAATT [11]
+0.299
+0.185
+0.124
+0.088
+0.266
+0.118
+-
+
+A​T​T​2​I​NATT2IN [10]
+0.325
+0.203
+0.136
+0.096
+0.276
+0.134
+-
+
+T​o​p​D​o​w​nTopDown [7]
+0.317
+0.195
+0.130
+0.092
+0.267
+0.128
+-
+
+C​M​C​LCMCL [42]
+0.344
+0.217
+0.140
+0.097
+0.281
+0.133
+-
+
+R​2​G​e​nR2Gen [1]
+0.353
+0.218
+0.145
+0.103
+0.277
+0.142
+0.146
+
+R​2​G​e​n​C​M​NR2GenCMN [2]
+0.353
+0.218
+0.148
+0.106
+0.278
+0.142
+-
+
+X​P​R​O​N​e​tXPRONet [3]
+0.344
+0.215
+0.146
+0.105
+0.279
+0.138
+0.154
+
+𝑪​𝑨​𝑴​𝑨​𝑵​𝒆​𝒕​(O​u​r​s)\bm{CAMANet}(Ours)
+0.374
+0.230
+0.155
+0.112
+0.279
+0.145
+0.161
+
+IV-C Implementation Details
+
+Following the same setting of previous work [41, 1, 2], we utilize both images of a patient on IU-XRay by concatenating the visual tokens, and one view for MIMIC-CXR. Images are firstly resized to (256,256)(256,256) and then cropped to (224,224)(224,224) (random crop in training and center crop in inference). During the training, we randomly apply one of the operation from {r​o​t​a​t​i​o​n,s​c​a​l​i​n​g}\{rotation,scaling\} to further augment the datasets. We employ the DenseNet121 [34] pre-trained on ImageNet [46] as our visual extractor and a randomly initialized memory driven Transformer [1] as the backbone for the encoder-decoder module with 33 layers, 8 attention heads and 512512 dimensions for the hidden states. The visual extractor produces 7×77\times 7 visual tokens, thus Ns=49N^{s}=49.
+
+The Adam [47] is used to optimize CAMANet. The learning rates are set to 1​e−31e-3 and 2​e−32e-3 for the visual extractor and encoder-decoder on IU-Xray, while MIMIC-CXR has a smaller learning rate with 5​e−55e-5 and 1​e−41e-4 respectively. λ\lambda and δ\delta in Equation 18 are set to 11 and 0.150.15 on IU-Xray, and 11 and 0.50.5 on MIMIC-CXR. The proportion of important words kk in Equation 16 is 0.250.25 and 0.30.3 on IU-Xray and MIMIC-CXR. Note that the optimal hyper-parameters are determined by evaluating the models on the validation sets.
+
+The same as the most promising studies [41, 43, 1, 2], reported, we adopt Beam Search as the sampling method when generating the reports in the validation and test sets. The beam size is set to 3 to balance effectiveness and efficiency. We implement our model via the PyTorch [48] deep learning framework on Nvidia RTX6000 GPU cards.
+
+IV-D Comparisons to SOTA methods
+
+We compare CAMANet to previous studies, including the models widely used in conventional image captioning [11, 10, 7], and those proposed for a medical domain [41, 17]. We also compare our method with recent SOTA methods designed for RRG [42, 1, 43, 2, 45, 44, 5, 3]. They are selected because they share the most similar experimental settings with CAMANet, e.g., the dataset split and the size of the beam search. CMAS-RL takes a two-stage strategy with a cooperative multi-agent system to implicitly capture the abnormalities. CMCL proposed a competence-based multi-modal curriculum learning schema to train the model from easy samples to difficult ones. SentSAT + KG pre-defined a knowledge graph to distill the prior konwledge into the model. KERP decomposed the RRG into explicit medical abnormality graph learning and subsequent natural language modeling. R2Gen designed a relational memory to record key textual information of the generation process. R2GenCMN utilizes a cross-modal memory matrix to record cross-modal patterns to enhance the encoder-decoder framework. XPRONet used a prototype-based cross-modal memory matrix and a multi-label contrastive loss to improve the cross-modal memory matrix learning.
+
+As Table III demonstrates, our proposed method achieves the best performance on all the evaluation metrics MIMIC-CXR datasets except for the RG-L metric on which CAMANet scores slightly lower (-0.2%) than C​M​C​LCMCL. Nevertheless, CAMANet surpasses C​M​C​LCMCL on all the remaining six evaluation metrics by a notable margin, indicating that CAMANet can generate more semantic reports rather than bias to one indicator such as precision or recall. Similar pattern can be seen on IU-Xray dataset where CAMANet obtains the best scores in four of the seven evaluation metrics and is slightly inferior to XPRONet on the remaining three metrics. Nonetheless, CAMANet surpasses the XPRONet on all the evaluation metrics on the MIMIC-CXR dataset. The possible reason is that XPRONet learns and records the cross-modal prototypes during the training, improving the modelling of informative cross-modal features. Nonetheless, learning the cross-modal prototypes is easier in the small dataset IU-Xray, but is of great difficulty in large dataset such as MIMIC-CXR which is almost 115 times the size of IU-Xray. This further demonstrates that CAMANet possess better generalization capability.
+
+Moreover, CAMANet outperforms the previous SOTA approaches by a notable margin. For instance, CAMANet surpasses the second-best BLEU-4 and CIDEr scores by 1.9% and 5.9% respectively on the IU-Xray dataset. Similarly, a 2.1% and 0.6% improvements can be seen on BLEU-1 and BLEU-4 scores of CAMANet compared to the second-best performing method on MIMIC-CXR. Note that the MIMIC-CXR dataset is much larger and challenging and making even a small improvement proves difficult.
+
+We mainly attribute the superiority of CAMANet to the improved cross-modal alignment achieved by the VTAC module, and the enriched disease-related feature representations by the proposed VDM assisted encoder. Further visualizations are provided in Section IV-I. The following ablation studies confirm the effectiveness of each component in CAMANet.
+
+Use of Pseudo Labels CAMANet utilizes the pseudo labels to generate the CAMs. Note that the visual extractor of CAMANET is IMAGENET pre-trained. Methods S​e​n​t​S​A​T+K​GSentSAT+KG [5] and R​A​T​C​H​E​TRATCHET [45] utilize pseudo labels to pre-train the visual extractor; HRGR adopts two auxiliary datasets with ground truth labels to pre-train the visual extractor; whereas KERP utilizes some manually labelled data and templates; C​M​C​LCMCL [44] uses the pseudo labels to fine-tune their visual extractor and determines the visual difficulty; XPRONet [3] utilizes the pseudo labels to form a cross-modal prototype-driven network. CAMANet still outperforms these methods. Furthermore, the pseudo-labels we used are provided with the MIMIC-CXR dataset.
+
+IV-E Clinical Efficacy
+
+To verify that our model can better capture the abnormal information, we further compare the clinical efficacy of CAMANet with recent SOTA RRG methods. Note that clinical efficacy metrics only apply to MIMIC-CXR because the labeling schema of CheXbert is designed for MIMIC-CXR. As can be seen, CAMANet outperforms the previous methods by a large margin on the precision and obtains the best result on the F1-score. In addition, CAMANet is also the second best-performing method by recall where the score is slight lower (-0.02) than the R2GenCMN. Note that R2GenCMN utilizes a large cross-modal trainable memory matrix (2048×5122048\times 512) which is expanded to each sample during the training to record the cross-modal patterns, significantly increasing the GPU memory requirement. Nonetheless, CAMANet still shows obviously better results on precision and F1-score with slight increase for the training cost.
+
+TABLE II: Clinical efficacy comparisons on MIMIC-CXR. ⋆\star means that results are obtained by using their provided trained models and released official code to generate the reports.
+
+Methods
+Precision
+Recall
+F1-Score
+
+R​2​G​e​n⋆R2Gen^{\star}
+0.406
+0.213
+0.280
+
+R​2​G​e​n​C​M​N⋆R2GenCMN^{\star}
+0.440
+0.325
+0.374
+
+X​P​R​O​N​e​t⋆XPRONet^{\star}
+0.463
+0.285
+0.353
+
+CAMANet
+0.483
+0.323
+0.387
+
+IV-F Comparisons to PLMs and PVLM
+
+We further compare our models with one recent approach [31] leveraging PLMs with prompt learning, and four recent PVLMs including two in medical/radiology domain [32, 33] and two in traditional scene domain [49, 50]. As can be seen in Table 2, CAMANet achieves competitive results to PromptRRG where CAMANet obtains better or same scores on three out of five evaluation metrics. Note that PromptRRG replaces the embedding layer with PLMs and leverages prompt learning to distill the prior knowledge into the entire model. Although demonstrating improvements in image retrieval and visual-question answering, the pre-trained vision-language models listed fails to show promising results in RRG possibly since the simple pre-training scheme cannot cope with the intrinsic problems in RRG aforementioned and inadequate pre-training paired strong annotation medical data for a cross-modal task such as RRG. Another reason is that the commonly used pre-training objectives, e.g., image-text matching, could be more difficult to take effect in RRG (see analysis of CLIP in ablation study).
+
+TABLE III: Comparative results of CAMANet with some recent studies leveraging the PLMs and four PVLMs on MIMIC-CXR dataset.
+
+Methods
+BL1
+BL4
+RG-L
+MTOR
+CIDEr
+
+P​r​o​m​p​t​R​R​GPromptRRG [31]
+0.348
+0.113
+0.263
+0.145
+0.286
+
+M​e​d​V​i​L​LMedViLL [32]
+-
+0.066
+-
+-
+-
+
+V​i​L​M​e​d​i​cViLMedic [33]
+-
+0.082
+0.225
+-
+-
+
+M​E​T​E​RMETER [49]
+0.308
+0.088
+0.232
+0.122
+0.179
+
+F​I​B​E​RFIBER [50]
+0.307
+0.093
+0.240
+0.123
+0.128
+
+C​A​M​A​N​e​tCAMANet
+0.374
+0.112
+0.279
+0.145
+0.161
+
+TABLE IV: The experimental results of ablation studies on the IU-Xray and MIMIC-CXR datasets.
+
+IU-Xray
+BL-1
+BL-2
+BL-3
+BL-4
+RG-L
+MTOR
+CIDR
+AVG.Δ\Delta
+
+Base
+0.451
+0.289
+0.209
+0.159
+0.365
+0.175
+0.336
+-
+
++VDMAE
+0.473
+0.321
+0.238
+0.177
+0.402
+0.189
+0.415
+11.8%
+
++VDMAE+VTAC
+0.504
+0.363
+0.279
+0.218
+0.407
+0.203
+0.418
+22.8%
+
+MIMIC-CXR
+BL-1
+BL-2
+BL-3
+BL-4
+RG-L
+MTOR
+CIDR
+AVG.Δ\Delta
+
+Base
+0.324
+0.203
+0.138
+0.100
+0.276
+0.135
+0.144
+-
+
++VDMAE
+0.357
+0.227
+0.148
+0.107
+0.277
+0.142
+0.162
+7.7%
+
++VDMAE+VTAC
+0.374
+0.230
+0.155
+0.112
+0.279
+0.145
+0.161
+10.5%
+
++VDMAE+CLIP(0.1)
+0.342
+0.211
+0.142
+0.102
+0.278
+0.138
+0.154
+3.5%
+
++VDMAE+CLIP(0.25)
+0.331
+0.204
+0.137
+0.098
+0.272
+0.134
+0.145
+0.0%
+
+IV-G Ablation Studies
+
+Here, we firstly explore the influence of each component in CAMANet including the VDMAE and VTAC module. The following models are used to conduct the ablation studies:
+
+• 
+
+Base: The base model consists only of the visual extractor and the base encoder-decoder without other extensions.
+
+• 
+
+Base+VDMAE: The standard encoder in the base model is replicated with our proposed VDM assisted encoder by adding the VDM Generation and VDMAE module.
+
+• 
+
+Base+VDMAE+VTAC: This is the full CAMANet containing all our proposed components.
+
+We present the main ablation study results in Table IV.
+A remarkable improvement can be seen by adding the VDMAE module, e.g., CIDEr scores increase from 0.3360.336 to 0.4150.415, and 0.1440.144 to 0.1620.162 on IU-Xray and MIMIC-CXR benchmarks respectively. Our method gains the most significant improvements when further integrating with the VTAC module. In particular, the full model obtains an average of 22.8\bm{22.8}% improvement over all the evaluation metrics on IU-Xray, and 10.5\bm{10.5}% on MIMIC-CXR. The improvements on MIMIC-CXR are less obvious than IU-Xray since it is harder to learn a robust discriminative representation and cross-modal alignments in such a large dataset (50 times larger than IU-Xray). Section IV-I presents some qualitative results to further illustrate the model’s effectiveness.
+
+To further demonstrate the effectiveness of our VTAC module, we compare it with a recent, widely-used image-text alignment technique CLIP [51] on the MIMIC-CXR dataset. Note that CLIP focuses on the image-text alignment while CAMANet is designed for a more fine-grained level, i.e., region-word alignments. Specifically, we adapt the CLIP technique to our base model by taking the averaged visual tokens and the averaged textual tokens from the last decoder layer to form an image-text matching task. We verify two set of CLIP loss weights, i.e., 0.10.1 and 0.250.25 and demonstrate the comparison in the last two rows in Table IV. As can be seen, adding the CLIP loss significantly harms the performance compared with its base model (Base+VDMAE) and reducing the contribution of the CLIP loss reduces the negative influence. The reason could be that images from different patients could have the same or almost the same reports especially for the normal cases in RRG. Furthermore, even in pathological cases, most report sentences may be associated with a description of normal findings. Therefore, image-text level alignment is more difficult to take effect in RRG and may confuse the model given normally unsatisfactory visual feature extractors in RRG. Nonetheless, our proposed VTAC module focuses on region-word alignments with each report, hence suffering less from this problem and demonstrating improved performance.
+
+IV-H Sensitivity of the Proportion of Selected Words
+
+To investigate the sensitivity of the hyper-parameter kk, we vary the proportion of the selected important word tokens from 0.150.15 to 0.350.35. As illustrated in Figure 4 and Figure 5, CAMANet is not overly sensitive to this proportion. However, it is still important to strike a balance when setting the value of kk as a small kk may not encompass all the important words, while too large a value may introduce irrelevant words. For example, a performance drop can be seen on the IU-Xray dataset when kk increases from 15 to 20. This might be caused by the introduction of unimportant (noisy) words such as “there” and “are”. Further increasing kk to 25 brings a notable improvement, demonstrating that the newly introduced words bring more benefits and offset any negative influence from previously noisy words. The fluctuation on IU-Xray is relatively greater than MIMIC-CXR, which is expected since IU-Xray is significantly smaller and the reports contain larger word variance compared to MIMIC-CXR.
+
+Fig. 4: Effect of varying kk on MIMIC-CXR. (BLEU-4 score).
+
+Fig. 5: Effect of varying kk on IU-Xray. (BLEU-4 score).
+
+Fig. 6: An example of the reports generated by different models. Most medical terms are highlighted to better differentiate the findings of report.
+
+Fig. 7: The visualizations of cross-modal attention maps for some medical terms by different models. The VDM and TDM are also shown and appear consistent with the GT report because: (1) they correctly highlight the right-lung; (2) the TDM hot-spots focus on the probable mild pulmonary vascular congestion noted by the radiologist.
+
+IV-I Qualitative Results
+
+To further verify the proposed method, we provide an example in Figure 6 which shows the reports generated by different models. CAMANet appears to better capture the disease information and generate the abnormal description, e.g., “…This accentuates the size of the cardiac silhouette which appears mildly enlarged…”, compared to the base model. Moreover, we visualize its generated visual discriminative map (VDM), textual discriminative map (TDM) and the cross-modal attention map from the last decoder in Figure 7 to explore whether the cross-modal alignment is truly enhanced by the proposed VTAC module. It can be seen that the Base model cannot learn any useful cross-modal alignments when generating the reports. Similar to the Base model, Base+VDMAE also fails in the cross-modal attention. This is expected since the discriminative representation is detached from the decoder. Nonetheless, owing to the enriched disease information, the Base+VDMAE model still can capture some abnormal single-model patterns, and therefore achieves improved performance compared to the Base model. It is clear that after adding the VTAC module, CAMANet demonstrates potent cross-modal alignment capability where the medical terms, e.g., ‘lung’, focus on the associated discriminative image regions, while trivial words, e.g., ‘without’, pay attention only to the background. Visualizations of the VDM and TDM further verify the effectiveness of employing a VDM as a form of pseudo label to supervise the cross-modal attention learning.
+
+Finally we present further visualization results in Figure 8. The visualizations show the reports predicted by CAMANet and the associated ground truth. We also provide the visual discriminative map (VDM), textual discriminative map (TDM), the cross-attention maps of some medical terms in the inference mode and include important words in the training.
+
+Fig. 8: Some examples of generated reports by CAMANet and the associated VDM, TDM, Cross-modal attention maps and selected important words. Duplicated words in the selected important words have been removed.
+
+IV-J Multi-label Classification Performance
+
+To further analyze whether the visual extractor can truly provide a useful discriminative map, we also evaluate the classification performance of the visual extractor on the validation and test sets of IU-Xray and MIMIC-CXR using precision and recall metrics. As Table VII shows, CAMANet achieves encouraging results on both sets of the IU-Xray which may partially explain the remarkable improvements of CAMANet on IU-Xray. Nonetheless, on MIMIC-CXR, CAMANet shows reasonably good results in the validation set, while performing worse in the test set with a precision score of 0.6747 and a recall score of 0.3871. We summarize the possible reasons below: (1) The IU-Xray dataset provides both the frontal and lateral view of the radiology images for each patient while MIMIC-CXR only has one view (frontal or lateral), making image classification more challenging on MIMIC-CXR; (2) the visual tokens are mainly tailored for the main task of report generation, rather than image classification; (3) Noisy and inaccurate pseudo-labels in a large dataset such as MIMIC-CXR have a more detrimental effect compared to smaller datasets.
+Nevertheless, an imperfect visual extractor can still bring notable improvements for report generation on MIMIC-CXR. During the experiments, we found that even if a sample is wrongly classified, the model may still produce an activation map focusing on the foreground, e.g, chest or lung, rather than the background, reducing the reliance on pseudo-labels. The second sample in Figure 8 demonstrates that a sample with pseudo label “Consolidation, Pneumonia” is wrongly classified as “Lung Opacity, Pleural Effusion, Support Devices”. Therefore, the model fails to pay attention to the specific, fine-grained abnormal regions. However, the model can still generate a visual discriminative map and attention maps (see the attention maps of word “pneumonia” and “consolidation”) focusing more on a relative coarse-grained “lung” region since the wrong prediction still shares some semantic information as pseudo-labels, i.e., lung-related diseases. In addition, the wrong pseudo label of “Lung Opacity, Pleural Effusion, Support Devices” contains the word of “Effusion”, which appeared in the ground truth report, ”no large effusion is seen”. This example shows that the activation map derived from a wrongly classified sample could still be useful in directing the model attention to the image region corresponding to the relevant organ, and the description of the pseudo label may find overlapping words in the ground truth report.
+
+IU-Xray
+MIMIC-CXR
+
+Subset
+Precision
+Recall
+Subset
+Precision
+Recall
+
+Val
+0.7551
+0.7639
+Val
+0.7255
+0.5413
+
+Test
+0.8000
+0.7915
+Test
+0.6747
+0.3871
+
+TABLE V: The multi-label classification results on the MIMIC-CXR and IU-Xray. Val and Test refer to the validation and test set.
+
+IV-K Computational Costs
+
+Training and Testing Time
+
+The batch size is set to 32 for IU-Xray and 64 for MIMIC-CXR. We train all the models for 30 epochs. Table VI shows the average training and testing time of one epoch for the Base and CAMANet on IU-Xray and MIMIC-CXR. CAMANet only slightly increases the training/testing time on MIMIC-CXR, while the increased computational cost is negligible on IU-Xray.
+
+Dataset
+Train
+Test
+
+Base
+CAMANet
+Base
+CAMANet
+
+IU-Xray
+0.41
+0.42
+1.28
+1.32
+
+MIMIC
+56.35
+60.06
+13.27
+13.46
+
+TABLE VI: The average training/test time (minutes) of one epoch for different models on the training/test set.
+
+The number of parameters
+
+Here, we compare the number of parameters of the Base and CAMANet models in Table VII. The increase in number of learnable parameters is negligible compared to the base model.
+
+Method
+Base
+CAMANet
+
+#Param
+46.07M
+46.09M
+
+TABLE VII: The number of parameters of different models.
+
+IV-L Limitations and Future Works
+
+Although the accuracy requirement of the pseudo labels is not critical, CAMANet still needs pseudo labels to develop the VDMAE and VTAC modules. We believe that CAMANet could bring greater improvements when given more accurate pseudo-labels. In addition, selected important words sometimes do not seem to capture the most important medical terms or, such important medical terms are not ranked at the top, possibly introducing noise in to the model. One possible reason is that the selection of the important words rely on the learning process which is based on the similarities between the discriminative representation and the word embeddings, while the learning of the discriminative representation is imperfect due to the inaccurate pseudo labels and influence from the main task, i.e., report generation (visual tokens are mainly tailored for main task, i.e., report generation, rather than image categorization.). Nonetheless, the inclusion of these commonly used words could also be reasonable in some cases as they may share the semantic information with these medical terms. For example, for the sentence “there is pleural effusion”, since the model generates the word one by one, words “there is” here will indicate the presentation of an important medical term.
+
+The failure cases include: (1) samples with very inaccurate pseudo labels, e.g., heart diseases to be labelled as lung diseases; (2) some images with rare descriptions fail to generate the abnormal findings as the severe data bias problem is not completely solved; (3) some images fails to generate the normal description such as “bony structures are intact”. However, we think some failures are also reasonable. For example, the radiologists’ behaviours towards the inclusion of some normal descriptions, e.g, “bony structures are intact”, are different as it seems acceptable to not mention the “bony structures are intact” if no abnormal findings are detected. This, however, could confuse the model.
+
+One future work could be how to design a more accurate method for selecting important words. In addition, alleviating the negative influence of noisy pseudo-labels plays an essential role in further improving the performance. Moreover, we utilize vanilla CAM in this work and more sophisticated CAM methods are highly expected to bring more promising results.
+
+V Conclusions
+
+In this work, we propose a novel class activation map guided RRG framework, CAMANet, which explicitly leverages cross-modal alignment and disease-related representation learning. Our visual discriminative map assisted encoder distills the discriminative information into the model via a derived discriminative representation and the self-attention mechanism. The generated VDM is then regarded as the ground truth in the proposed visual-textual attention consistency module to supervise the cross-modal attention learning, aimed at explicitly promoting cross-modal alignment. Experimental results on two widely used RRG benchmarks prove the superiority of CAMANet over previous studies. The ablation studies further verify the effectiveness of individual components of CAMANet. Moreover, a number of illustrative visualizations and discussions are provided to inspire future research.
+
+Declaration of competing interest
+
+The authors declare that they have no known competing financial interests or personal relationships that could have appeared to influence the work reported in this paper.
+
+References
+
+      
+[1]
+
+Z. Chen, Y. Song, T.-H. Chang, and X. Wan, “Generating radiology reports via
+memory-driven transformer,” in Proceedings of the 2020 Conference on
+EMNLP, 2020, pp. 1439–1449.
+
+      
+[2]
+
+Z. Chen, Y. Shen, Y. Song, and X. Wan, “Cross-modal memory networks for
+radiology report generation,” in ACL (Long), 2021, pp. 5904–5914.
+
+      
+[3]
+
+J. Wang, A. Bhalerao, and Y. He, “Cross-modal prototype driven network for
+radiology report generation,” in Proceedings of the 17th European
+Conference on Computer Vision, Tel Aviv, Israel, October 23–27, 2022, Part
+XXXV. Springer, 2022, pp. 563–579.
+
+      
+[4]
+
+G. Liu, T.-M. H. Hsu, M. McDermott, W. Boag, W.-H. Weng, P. Szolovits, and
+M. Ghassemi, “Clinically accurate chest x-ray report generation,” in
+Machine Learning for Healthcare Conference. PMLR, 2019, pp. 249–269.
+
+      
+[5]
+
+Y. Zhang, X. Wang, Z. Xu, Q. Yu, A. Yuille, and D. Xu, “When radiology report
+generation meets knowledge graph,” in Proceedings of the AAAI
+Conference on Artificial Intelligence, vol. 34, no. 07, 2020, pp.
+12 910–12 917.
+
+      
+[6]
+
+B. Zhou, A. Khosla, A. Lapedriza, A. Oliva, and A. Torralba, “Learning deep
+features for discriminative localization,” in Proceedings of the IEEE
+Conference on Computer Vision and Pattern Recognition, 2016, pp. 2921–2929.
+
+      
+[7]
+
+P. Anderson, X. He, C. Buehler, D. Teney, M. Johnson, S. Gould, and L. Zhang,
+“Bottom-up and top-down attention for image captioning and visual question
+answering,” in Proceedings of the IEEE Conference on Computer Vision
+and Pattern Recognition, 2018, pp. 6077–6086.
+
+      
+[8]
+
+L. Guo, J. Liu, X. Zhu, P. Yao, S. Lu, and H. Lu, “Normalized and
+geometry-aware self-attention network for image captioning,” in
+Proceedings of the IEEE Conference on Computer Vision and Pattern
+Recognition, 2020, pp. 10 327–10 336.
+
+      
+[9]
+
+Y. Pan, T. Yao, Y. Li, and T. Mei, “X-linear attention networks for image
+captioning,” in Proceedings of the IEEE Conference on Computer Vision
+and Pattern Recognition, 2020, pp. 10 971–10 980.
+
+      
+[10]
+
+S. J. Rennie, E. Marcheret, Y. Mroueh, J. Ross, and V. Goel, “Self-critical
+sequence training for image captioning,” in Proceedings of the IEEE
+Conference on Computer Vision and Pattern Recognition, 2017, pp. 7008–7024.
+
+      
+[11]
+
+J. Lu, C. Xiong, D. Parikh, and R. Socher, “Knowing when to look: Adaptive
+attention via a visual sentinel for image captioning,” in Proceedings
+of the IEEE Conference on Computer Vision and Pattern Recognition, 2017, pp.
+375–383.
+
+      
+[12]
+
+M. Cornia, M. Stefanini, L. Baraldi, and R. Cucchiara, “Meshed-memory
+transformer for image captioning,” in Proceedings of the IEEE
+Conference on Computer Vision and Pattern Recognition, 2020, pp.
+10 578–10 587.
+
+      
+[13]
+
+J. Ji, Y. Luo, X. Sun, F. Chen, G. Luo, Y. Wu, Y. Gao, and R. Ji, “Improving
+image captioning by leveraging intra-and inter-layer global representation in
+transformer network,” in Proceedings of the AAAI Conference on
+Artificial Intelligence, vol. 35, no. 2, 2021, pp. 1655–1663.
+
+      
+[14]
+
+A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez,
+Ł. Kaiser, and I. Polosukhin, “Attention is all you need,”
+Advances in Neural Information Processing Systems, vol. 30, 2017.
+
+      
+[15]
+
+J. Krause, J. Johnson, R. Krishna, and L. Fei-Fei, “A hierarchical approach
+for generating descriptive image paragraphs,” in Proceedings of the
+IEEE Conference on Computer Vision and Pattern Recognition, 2017, pp.
+317–325.
+
+      
+[16]
+
+L. Melas-Kyriazi, A. M. Rush, and G. Han, “Training for diversity in image
+paragraph captioning,” in Proceedings of the 2018 Conference on
+EMNLP, 2018, pp. 757–761.
+
+      
+[17]
+
+B. Jing, P. Xie, and E. Xing, “On the automatic generation of medical imaging
+reports,” in ACL (Long), 2018, pp. 2577–2586.
+
+      
+[18]
+
+F. Liu, X. Wu, S. Ge, W. Fan, and Y. Zou, “Exploring and distilling posterior
+and prior knowledge for radiology report generation,” in Proceedings
+of the IEEE Conference on Computer Vision and Pattern Recognition, 2021, pp.
+13 753–13 762.
+
+      
+[19]
+
+Y. Zhou, M. Wang, D. Liu, Z. Hu, and H. Zhang, “More grounded image captioning
+by distilling image-text matching model,” in Proceedings of the IEEE
+Conference on Computer Vision and Pattern Recognition, 2020, pp. 4777–4786.
+
+      
+[20]
+
+K. Chen, J. Gao, and R. Nevatia, “Knowledge aided consistency for weakly
+supervised phrase grounding,” in Proceedings of the IEEE Conference on
+Computer Vision and Pattern Recognition, 2018, pp. 4042–4050.
+
+      
+[21]
+
+S. Ren, K. He, R. Girshick, and J. Sun, “Faster r-cnn: Towards real-time
+object detection with region proposal networks,” Advances in Neural
+Information Processing Systems, vol. 28, 2015.
+
+      
+[22]
+
+W. Bae, J. Noh, and G. Kim, “Rethinking class activation mapping for weakly
+supervised object localization,” in European Conference on Computer
+Vision. Springer, 2020, pp. 618–634.
+
+      
+[23]
+
+P.-T. Jiang, C.-B. Zhang, Q. Hou, M.-M. Cheng, and Y. Wei, “Layercam:
+Exploring hierarchical class activation maps for localization,” IEEE
+Transactions on Image Processing, vol. 30, pp. 5875–5888, 2021.
+
+      
+[24]
+
+J. Xie, C. Luo, X. Zhu, Z. Jin, W. Lu, and L. Shen, “Online refinement of
+low-level feature based activation map for weakly supervised object
+localization,” in Proceedings of the IEEE International Conference on
+Computer Vision, 2021, pp. 132–141.
+
+      
+[25]
+
+K. Sun, H. Shi, Z. Zhang, and Y. Huang, “Ecs-net: Improving weakly supervised
+semantic segmentation by using connections between class activation maps,”
+in Proceedings of the IEEE International Conference on Computer
+Vision, 2021, pp. 7283–7292.
+
+      
+[26]
+
+Z. Chen, T. Wang, X. Wu, X.-S. Hua, H. Zhang, and Q. Sun, “Class re-activation
+maps for weakly-supervised semantic segmentation,” in Proceedings of
+the IEEE Conference on Computer Vision and Pattern Recognition, 2022, pp.
+969–978.
+
+      
+[27]
+
+L. Ru, Y. Zhan, B. Yu, and B. Du, “Learning affinity from attention:
+End-to-end weakly-supervised semantic segmentation with transformers,” in
+Proceedings of the IEEE Conference on Computer Vision and Pattern
+Recognition, 2022, pp. 16 846–16 855.
+
+      
+[28]
+
+Z. Liu, A. Zhong, Y. Li, L. Yang, C. Ju, Z. Wu, C. Ma, P. Shu, C. Chen, S. Kim
+et al., “Radiology-gpt: A large language model for radiology,”
+arXiv preprint arXiv:2306.08666, 2023.
+
+      
+[29]
+
+K. Singhal, T. Tu, J. Gottweis, R. Sayres, E. Wulczyn, L. Hou, K. Clark,
+S. Pfohl, H. Cole-Lewis, D. Neal et al., “Towards expert-level
+medical question answering with large language models,” arXiv preprint
+arXiv:2305.09617, 2023.
+
+      
+[30]
+
+B. Boecking, N. Usuyama, S. Bannur, D. C. Castro, A. Schwaighofer, S. Hyland,
+M. Wetscherek, T. Naumann, A. Nori, J. Alvarez-Valle et al., “Making
+the most of text semantics to improve biomedical vision–language
+processing,” in European conference on computer vision. Springer, 2022, pp. 1–21.
+
+      
+[31]
+
+J. Wang, L. Zhu, A. Bhalerao, and Y. He, “Can prompt learning benefit
+radiology report generation?” arXiv preprint arXiv:2308.16269, 2023.
+
+      
+[32]
+
+J. H. Moon, H. Lee, W. Shin, Y.-H. Kim, and E. Choi, “Multi-modal
+understanding and generation for medical images and text via vision-language
+pre-training,” IEEE Journal of Biomedical and Health Informatics,
+vol. 26, no. 12, pp. 6070–6080, 2022.
+
+      
+[33]
+
+J.-b. Delbrouck, K. Saab, M. Varma, S. Eyuboglu, P. Chambon, J. Dunnmon,
+J. Zambrano, A. Chaudhari, and C. Langlotz, “Vilmedic: a framework for
+research at the intersection of vision and language in medical ai,” in
+Proceedings of the 60th ACL: System Demonstrations, 2022, pp. 23–34.
+
+      
+[34]
+
+G. Huang, Z. Liu, L. Van Der Maaten, and K. Q. Weinberger, “Densely connected
+convolutional networks,” in Proceedings of the IEEE Conference on
+Computer Vision and Pattern Recognition, 2017, pp. 4700–4708.
+
+      
+[35]
+
+J. Irvin, P. Rajpurkar, M. Ko, Y. Yu, S. Ciurea-Ilcus, C. Chute, H. Marklund,
+B. Haghgoo, R. Ball, K. Shpanskaya et al., “Chexpert: A large chest
+radiograph dataset with uncertainty labels and expert comparison,” in
+Proceedings of the AAAI conference on artificial intelligence,
+vol. 33, no. 01, 2019, pp. 590–597.
+
+      
+[36]
+
+K. Papineni, S. Roukos, T. Ward, and W.-J. Zhu, “Bleu: a method for automatic
+evaluation of machine translation,” in ACL, 2002, pp. 311–318.
+
+      
+[37]
+
+C.-Y. Lin, “Rouge: A package for automatic evaluation of summaries,” in
+Text Summarization Branches Out, 2004, pp. 74–81.
+
+      
+[38]
+
+M. Denkowski and A. Lavie, “Meteor 1.3: Automatic metric for reliable
+optimization and evaluation of machine translation systems,” in
+Proceedings of the sixth workshop on Statistical Machine Translation,
+2011, pp. 85–91.
+
+      
+[39]
+
+R. Vedantam, C. Lawrence Zitnick, and D. Parikh, “Cider: Consensus-based image
+description evaluation,” in Proceedings of the IEEE Conference on
+Computer Vision and Pattern Recognition, 2015, pp. 4566–4575.
+
+      
+[40]
+
+A. Smit, S. Jain, P. Rajpurkar, A. Pareek, A. Y. Ng, and M. Lungren,
+“Combining automatic labelers and expert annotations for accurate radiology
+report labeling using bert,” in Proceedings of the 2020 Conference on
+EMNLP, 2020, pp. 1500–1519.
+
+      
+[41]
+
+Y. Li, X. Liang, Z. Hu, and E. P. Xing, “Hybrid retrieval-generation
+reinforced agent for medical image report generation,” Advances in
+Neural Information Processing Systems, vol. 31, 2018.
+
+      
+[42]
+
+B. Jing, Z. Wang, and E. Xing, “Show, describe and conclude: On exploiting the
+structure information of chest x-ray reports,” in ACL, 2019, pp.
+6570–6580.
+
+      
+[43]
+
+C. Y. Li, X. Liang, Z. Hu, and E. P. Xing, “Knowledge-driven encode, retrieve,
+paraphrase for medical image report generation,” in Proceedings of the
+AAAI Conference on Artificial Intelligence, vol. 33, no. 01, 2019, pp.
+6666–6673.
+
+      
+[44]
+
+F. Liu, S. Ge, and X. Wu, “Competence-based multimodal curriculum learning for
+medical report generation,” in ACL (Long). Association for Computational Linguistics, 2021, pp. 3001–3012.
+
+      
+[45]
+
+B. Hou, G. Kaissis, R. M. Summers, and B. Kainz, “Ratchet: Medical transformer
+for chest x-ray diagnosis and reporting,” in International Conference
+on Medical Image Computing and Computer-Assisted Intervention. Springer, 2021, pp. 293–303.
+
+      
+[46]
+
+J. Deng, W. Dong, R. Socher, L.-J. Li, K. Li, and L. Fei-Fei, “Imagenet: A
+large-scale hierarchical image database,” in 2009 IEEE Conference on
+Computer Vision and Pattern Recognition. Ieee, 2009, pp. 248–255.
+
+      
+[47]
+
+D. P. Kingma and J. Ba, “Adam: A method for stochastic optimization,” in
+International Conference on Learning Representations, (Poster), 2015.
+
+      
+[48]
+
+A. Paszke, S. Gross, F. Massa, A. Lerer, J. Bradbury, G. Chanan, T. Killeen,
+Z. Lin, N. Gimelshein, L. Antiga et al., “Pytorch: An imperative
+style, high-performance deep learning library,” Advances in Neural
+Information Processing Systems, vol. 32, 2019.
+
+      
+[49]
+
+Z.-Y. Dou, Y. Xu, Z. Gan, J. Wang, S. Wang, L. Wang, C. Zhu, P. Zhang, L. Yuan,
+N. Peng et al., “An empirical study of training end-to-end
+vision-and-language transformers,” in Proceedings of the IEEE
+Conference on Computer Vision and Pattern Recognition, 2022, pp.
+18 166–18 176.
+
+      
+[50]
+
+Z.-Y. Dou, A. Kamath, Z. Gan, P. Zhang, J. Wang, L. Li, Z. Liu, C. Liu,
+Y. LeCun, N. Peng et al., “Coarse-to-fine vision-language
+pre-training with fusion in the backbone,” Advances in neural
+information processing systems, vol. 35, pp. 32 942–32 956, 2022.
+
+      
+[51]
+
+A. Radford, J. W. Kim, C. Hallacy, A. Ramesh, G. Goh, S. Agarwal, G. Sastry,
+A. Askell, P. Mishkin, J. Clark et al., “Learning transferable visual
+models from natural language supervision,” in International conference
+on machine learning. PMLR, 2021, pp.
+8748–8763.
+
+    
+
+◄
+    
+    Feelinglucky?
+    
+    Conversionreport
+    Reportan issue
+    View originalon arXiv►
+
+Copyright
+Privacy Policy
+
+Generated  by LaTeXML oxide
+
+    
+    
+    
+
